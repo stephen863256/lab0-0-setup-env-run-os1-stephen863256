@@ -10,11 +10,18 @@ ifeq ($(MODE), release)
 	MODE_ARG := --release
 endif
 
+# Building mode argument
+ifeq ($(MODE), release)
+	MODE_ARG := --release
+endif
+
 # BOARD
 BOARD := qemu
 SBI ?= rustsbi
 BOOTLOADER := ../bootloader/$(SBI)-$(BOARD).bin
 
+# KERNEL ENTRY
+KERNEL_ENTRY_PA := 0x80200000
 # KERNEL ENTRY
 KERNEL_ENTRY_PA := 0x80200000
 
@@ -25,6 +32,13 @@ OBJCOPY := rust-objcopy --binary-architecture=riscv64
 # Disassembly
 DISASM ?= -x
 
+build: env $(KERNEL_BIN)
+
+env:
+	(rustup target list | grep "riscv64gc-unknown-none-elf (installed)") || rustup target add $(TARGET)
+	cargo install cargo-binutils
+	rustup component add rust-src
+	rustup component add llvm-tools-preview
 build: env $(KERNEL_BIN)
 
 env:
@@ -64,13 +78,28 @@ QEMU_ARGS := -machine virt \
 
 run-inner: build
 	@qemu-system-riscv64 $(QEMU_ARGS)
+QEMU_ARGS := -machine virt \
+			 -nographic \
+			 -bios $(BOOTLOADER) \
+			 -device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA)
+
+run-inner: build
+	@qemu-system-riscv64 $(QEMU_ARGS)
 
 debug: build
 	@tmux new-session -d \
 		"qemu-system-riscv64 $(QEMU_ARGS) -s -S" && \
+		"qemu-system-riscv64 $(QEMU_ARGS) -s -S" && \
 		tmux split-window -h "riscv64-unknown-elf-gdb -ex 'file $(KERNEL_ELF)' -ex 'set arch riscv:rv64' -ex 'target remote localhost:1234'" && \
 		tmux -2 attach-session -d
 
+gdbserver: build
+	@qemu-system-riscv64 $(QEMU_ARGS) -s -S
+
+gdbclient:
+	@riscv64-unknown-elf-gdb -ex 'file $(KERNEL_ELF)' -ex 'set arch riscv:rv64' -ex 'target remote localhost:1234'
+
+.PHONY: build env kernel clean disasm disasm-vim run-inner gdbserver gdbclient
 gdbserver: build
 	@qemu-system-riscv64 $(QEMU_ARGS) -s -S
 
